@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+const (
+	url = "https://cloud.humio.com/api/v1/repositories/sockshop-traces/query"
+)
+
 type spanReader struct {
 	logger hclog.Logger
 	client *http.Client
@@ -39,8 +43,9 @@ func (s *spanReader) GetTrace(ctx context.Context, traceID model.TraceID) (*mode
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
 	var body = []byte(`{"queryString":"* | trace_id = ` + traceID.String() + ` | groupBy(field=[@rawstring])", "start": "` + beginningOfTime + `s", "end": "now"}`)
 
-	req, err := http.NewRequest("POST", "https://cloud.humio.com/api/v1/repositories/sockshop-traces/query", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
+
 		return nil, err
 	}
 	resp, err := s.client.Do(req)
@@ -80,12 +85,14 @@ func (s *spanReader) GetServices(ctx context.Context) ([]string, error) {
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
 	var body = []byte(`{"queryString":"groupBy(service)", "start": "` + beginningOfTime + `s", "end": "now"}`)
 
-	req, err := http.NewRequest("POST", "https://cloud.humio.com/api/v1/repositories/sockshop-traces/query", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
+		s.logger.Error("INFOTAG GetServices() error " + err.Error())
 		return nil, err
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
+		s.logger.Error("INFOTAG GetServices() error " + err.Error())
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -120,13 +127,14 @@ func (s *spanReader) GetOperations(ctx context.Context, query spanstore.Operatio
 	}
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
 	var body = []byte(`{"queryString":"` + queryFields + `groupBy(field=[name, kind])", "start": "` + beginningOfTime + `s", "end": "now"}`)
-	req, err := http.NewRequest("POST", "https://cloud.humio.com/api/v1/repositories/sockshop-traces/query", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		s.logger.Error("INFOTAG GetOperations() error: " + err.Error())
 		return nil, err
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
+		s.logger.Error("INFOTAG GetOperations() error " + err.Error())
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -187,13 +195,15 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 		body = []byte(testString)
 	}
 
-	req, err := http.NewRequest("POST", "https://cloud.humio.com/api/v1/repositories/sockshop-traces/query", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		s.logger.Error("INFOTAG FindTraces() error " + err.Error())
+		return nil, err
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
 		s.logger.Error("INFOTAG FindTraces() error " + err.Error())
+		return nil, err
 	}
 
 	defer resp.Body.Close()
@@ -234,7 +244,6 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 		}
 		traces = append(traces, &trace)
 	}
-	s.logger.Warn("INFOTAG FindTraces() end")
 	return traces, nil
 }
 
@@ -249,7 +258,6 @@ func (s *spanReader) FindTraceIDs(ctx context.Context, query *spanstore.TraceQue
 func createSpan(spanElement models.SpanElement) (*model.Span, error) {
 	var modelSpan models.Span
 	json.Unmarshal([]byte(spanElement.Rawstring), &modelSpan)
-
 	traceId, err := model.TraceIDFromString(modelSpan.TraceID)
 	if err != nil {
 		return nil, err
@@ -290,7 +298,7 @@ func createSpan(spanElement models.SpanElement) (*model.Span, error) {
 		Tags:                 spanTags,
 		Logs:                 []model.Log{},
 		Process:              &process,
-		ProcessID:            "ProcessId(span)",
+		ProcessID:            "",
 		Warnings:             []string{},
 		XXX_NoUnkeyedLiteral: struct{}{},
 		XXX_unrecognized:     []byte{},
