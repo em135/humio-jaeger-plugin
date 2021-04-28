@@ -14,6 +14,11 @@ type HumioPlugin struct {
 	Client *http.Client
 }
 
+
+const (
+	url = "https://cloud.humio.com/api/v1/repositories/sockshop-traces/query"
+)
+
 func NewHumioPlugin(logger hclog.Logger, token string) *HumioPlugin {
 	client := http.DefaultClient
 	rt := NewAddHeader(client.Transport, token)

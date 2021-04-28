@@ -15,10 +15,6 @@ import (
 	"time"
 )
 
-const (
-	url = "https://cloud.humio.com/api/v1/repositories/sockshop-traces/query"
-)
-
 type spanReader struct {
 	logger hclog.Logger
 	client *http.Client
