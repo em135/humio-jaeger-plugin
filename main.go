@@ -1,11 +1,11 @@
 package main
 
 import (
-	"HumioJaegerStoragePlugin/plugin"
 	"flag"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/plugin/storage/grpc"
 	"github.com/jaegertracing/jaeger/plugin/storage/grpc/shared"
+	"humio-jaeger-plugin/plugin"
 	"os"
 )
 

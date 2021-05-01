@@ -27,11 +27,12 @@ type Dependency struct {
 func (d dependencyReader) GetDependencies(ctx context.Context, endTs time.Time, lookback time.Duration) ([]model.DependencyLink, error) {
 	span, ctx := opentracing.StartSpanFromContext(ctx, "GetDependencies")
 	defer span.Finish()
-	// TODO: noget galt med tiden...
-	var oneHourAgo = strconv.FormatInt(time.Now().Unix() - 3600, 10)
-	var stringBody = `{"queryString":"groupBy([service, span_id, parent_id])", "start": "` + oneHourAgo + `s", "end": "now"}`
+
+	//{"queryString":"groupBy(service, function=(collect([trace_id, parent_id])))", "start": "86400s", "end": "now"}
+	var oneDayAgo = "86400s"
+	var stringBody = `{"queryString":"groupBy([service, span_id, parent_id])", "start": "` + oneDayAgo + `", "end": "now"}`
 	d.logger.Warn("INFOTAG GetDependencies()1.1 " + stringBody)
-	var body = []byte(`{"queryString":"groupBy([service, span_id, parent_id])", "start": "` + oneHourAgo + `s", "end": "now"}`)
+	var body = []byte(`{"queryString":"groupBy([service, span_id, parent_id])", "start": "` + oneDayAgo + `", "end": "now"}`)
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {

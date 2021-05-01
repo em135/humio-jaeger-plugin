@@ -1,13 +1,22 @@
 package plugin
 
+
+// TODO: api/traces/{trace_id} giver fejl, api/services virker, api/operations virker...
+// Måsker mangler der noget med lock / unlock
+// Måske skal der skives spans, det giver dog ikke mening, det er jo at skrive til Humio?
+// Der er nok noget galt med at tingene ikke bliver bundet sammen, eller der ikke bliver kaldt det rigtige?
 import (
-	"HumioJaegerStoragePlugin/models"
+
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/model"
+	"humio-jaeger-plugin/models"
+
+	//"github.com/jaegertracing/jaeger/model/adjuster"
+	//"github.com/jaegertracing/jaeger/pkg/memory/config"
+	//"github.com/golang/protobuf/proto"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
 	"github.com/opentracing/opentracing-go"
 	"net/http"
@@ -21,7 +30,7 @@ type spanReader struct {
 }
 
 func (h *HumioPlugin) SpanReader() spanstore.Reader {
-	h.Logger.Warn("INFOTAG SpanReader()")
+	h.Logger.Warn("INFOTAG_READER SpanReader()")
 	if h.spanReader == nil {
 		h.Logger.Warn("INFOTAG SpanReader() is nil")
 		reader := &spanReader{logger: h.Logger, client: h.Client}
@@ -32,10 +41,10 @@ func (h *HumioPlugin) SpanReader() spanstore.Reader {
 }
 
 func (s *spanReader) GetTrace(ctx context.Context, traceID model.TraceID) (*model.Trace, error) {
-	s.logger.Warn("INFOTAG GetTrace()")
-	str := fmt.Sprintf("%v", ctx)
-	s.logger.Warn("INFOTAG " + str)
+	s.logger.Warn("INFOTAG_READER GetTrace()")
 
+	span, ctx := opentracing.StartSpanFromContext(ctx, "GetTrace")
+	defer span.Finish()
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
 	var body = []byte(`{"queryString":"* | trace_id = ` + traceID.String() + ` | groupBy(field=[@rawstring])", "start": "` + beginningOfTime + `s", "end": "now"}`)
 
@@ -70,12 +79,11 @@ func (s *spanReader) GetTrace(ctx context.Context, traceID model.TraceID) (*mode
 		XXX_unrecognized:     []byte{},
 		XXX_sizecache:        0,
 	}
-
 	return &trace, nil
 }
 
 func (s *spanReader) GetServices(ctx context.Context) ([]string, error) {
-	s.logger.Warn("INFOTAG GetServices() 0")
+	s.logger.Warn("INFOTAG_READER GetServices()")
 	span, ctx := opentracing.StartSpanFromContext(ctx, "GetServices")
 	defer span.Finish()
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
@@ -108,7 +116,7 @@ func (s *spanReader) GetServices(ctx context.Context) ([]string, error) {
 
 // TODO beggningOfTime might not be a good idea, make a system property that the image is run with
 func (s *spanReader) GetOperations(ctx context.Context, query spanstore.OperationQueryParameters) ([]spanstore.Operation, error) {
-	s.logger.Warn("INFOTAG GetOperations()")
+	s.logger.Warn("INFOTAG_READER GetOperations()")
 	span, ctx := opentracing.StartSpanFromContext(ctx, "GetOperations")
 	defer span.Finish()
 
@@ -152,7 +160,7 @@ func (s *spanReader) GetOperations(ctx context.Context, query spanstore.Operatio
 }
 
 func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQueryParameters) ([]*model.Trace, error) {
-	s.logger.Warn("INFOTAG FindTraces()")
+	s.logger.Warn("INFOTAG_READER FindTraces()")
 	span1, ctx := opentracing.StartSpanFromContext(ctx, "GetOperations")
 	defer span1.Finish()
 
@@ -243,9 +251,8 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 	return traces, nil
 }
 
-// TODO implement me
 func (s *spanReader) FindTraceIDs(ctx context.Context, query *spanstore.TraceQueryParameters) ([]model.TraceID, error) {
-	s.logger.Warn("INFOTAG FindTraceIDs()")
+	s.logger.Warn("INFOTAG_READER FindTraceIDs()")
 	span, ctx := opentracing.StartSpanFromContext(ctx, "GetOperations")
 	defer span.Finish()
 	return nil, nil

@@ -14,7 +14,6 @@ type HumioPlugin struct {
 	Client *http.Client
 }
 
-
 const (
 	url = "https://cloud.humio.com/api/v1/repositories/sockshop-traces/query"
 )
