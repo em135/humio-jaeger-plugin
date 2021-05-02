@@ -1,8 +1,9 @@
 package plugin
 
 import (
-	"github.com/hashicorp/go-hclog"
 	"net/http"
+
+	"github.com/hashicorp/go-hclog"
 )
 
 type HumioPlugin struct {
@@ -10,8 +11,8 @@ type HumioPlugin struct {
 	spanWriter       *spanWriter
 	dependencyReader *dependencyReader
 
-	Logger hclog.Logger
-	Client *http.Client
+	logger hclog.Logger
+	client *http.Client
 }
 
 const (
@@ -23,8 +24,8 @@ func NewHumioPlugin(logger hclog.Logger, token string) *HumioPlugin {
 	rt := NewAddHeader(client.Transport, token)
 	client.Transport = rt
 	return &HumioPlugin{
-		Logger: logger,
-		Client: client,
+		logger: logger,
+		client: client,
 	}
 }
 
@@ -41,7 +42,7 @@ func NewAddHeader(rt http.RoundTripper, token string) AddHeader {
 }
 
 func (ah AddHeader) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.Header.Set("Authorization", "Bearer " + ah.token)
+	req.Header.Set("Authorization", "Bearer "+ah.token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	return ah.rt.RoundTrip(req)

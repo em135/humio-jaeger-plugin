@@ -1,4 +1,4 @@
-package models
+package humio
 
 type Service struct {
 	Service string `json:"service"`

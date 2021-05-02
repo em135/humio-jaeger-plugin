@@ -1,4 +1,4 @@
-package models
+package humio
 
 import "encoding/json"
 

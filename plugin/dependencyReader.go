@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"time"
+
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/storage/dependencystore"
 	"github.com/opentracing/opentracing-go"
-	"net/http"
-	"time"
 )
 
 type dependencyReader struct {
@@ -19,18 +20,17 @@ type dependencyReader struct {
 
 type Dependency struct {
 	Service  string `json:"service"`
-	SpanID   string  `json:"span_id"`
+	SpanID   string `json:"span_id"`
 	ParentID string `json:"parent_id"`
 }
 
 func (d dependencyReader) GetDependencies(ctx context.Context, endTs time.Time, lookback time.Duration) ([]model.DependencyLink, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "GetDependencies")
+	span, _ := opentracing.StartSpanFromContext(ctx, "GetDependencies")
 	defer span.Finish()
 
-	//{"queryString":"groupBy(service, function=(collect([trace_id, parent_id])))", "start": "86400s", "end": "now"}
 	var oneDayAgo = "86400s"
 	var stringBody = `{"queryString":"groupBy([service, span_id, parent_id])", "start": "` + oneDayAgo + `", "end": "now"}`
-	d.logger.Warn("INFOTAG GetDependencies()1.1 " + stringBody)
+	d.logger.Warn("GetDependencies(): " + stringBody)
 	var body = []byte(`{"queryString":"groupBy([service, span_id, parent_id])", "start": "` + oneDayAgo + `", "end": "now"}`)
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
@@ -47,7 +47,7 @@ func (d dependencyReader) GetDependencies(ctx context.Context, endTs time.Time, 
 	var dependencies []Dependency
 	json.NewDecoder(resp.Body).Decode(&dependencies)
 
-	var parentIdChildCounts = make(map[string]map[string] int)
+	var parentIdChildCounts = make(map[string]map[string]int)
 	var spanIdServices = make(map[string]string)
 
 	for i := range dependencies {
@@ -56,10 +56,10 @@ func (d dependencyReader) GetDependencies(ctx context.Context, endTs time.Time, 
 		var span = dependency.SpanID
 		var parent = dependency.ParentID
 		spanIdServices[span] = service
-		if parent == ""{
+		if parent == "" {
 			continue
 		}
-		if serviceCounts, parentExists  := parentIdChildCounts[parent]; parentExists  {
+		if serviceCounts, parentExists := parentIdChildCounts[parent]; parentExists {
 			if count, serviceExists := serviceCounts[service]; serviceExists {
 				serviceCounts[service] = count + 1
 			} else {
@@ -71,15 +71,7 @@ func (d dependencyReader) GetDependencies(ctx context.Context, endTs time.Time, 
 			parentIdChildCounts[parent] = serviceCounts
 		}
 	}
-	//
-	//for k, v := range parentIdChildCounts {
-	//	d.logger.Warn("INFOTAG GetDependencies() key " + k)
-	//	for j, v := range v {
-	//		d.logger.Warn("INFOTAG GetDependencies() value " + j + " count: " + string(v))
-	//	}
-	//}
 
-	d.logger.Warn("INFOTAG GetDependencies()4")
 	var dependencyLinks []model.DependencyLink
 	for parent, childCounts := range parentIdChildCounts {
 		if service, parentExists := spanIdServices[parent]; parentExists {
@@ -87,7 +79,7 @@ func (d dependencyReader) GetDependencies(ctx context.Context, endTs time.Time, 
 				var dependencyLink = model.DependencyLink{
 					Parent:               service,
 					Child:                child,
-					CallCount: 			  uint64(count),
+					CallCount:            uint64(count),
 					Source:               "Humio",
 					XXX_NoUnkeyedLiteral: struct{}{},
 					XXX_unrecognized:     nil,
@@ -98,36 +90,13 @@ func (d dependencyReader) GetDependencies(ctx context.Context, endTs time.Time, 
 		}
 	}
 
-	//for i := range spanIdServices {
-	//	var span = spanIdServices[i]
-	//	if childCounts, parentExists := parentIdChildCounts[span]; parentExists {
-	//		d.logger.Warn("INFOTAG GetDependencies()4.0")
-	//		for child, count := range childCounts {
-	//			d.logger.Warn("INFOTAG GetDependencies()4.1")
-	//			var dependencyLink = model.DependencyLink{
-	//				Parent:               span,
-	//				Child:                child,
-	//				CallCount: 			  uint64(count),
-	//				Source:               "Humio",
-	//				XXX_NoUnkeyedLiteral: struct{}{},
-	//				XXX_unrecognized:     nil,
-	//				XXX_sizecache:        0,
-	//			}
-	//			dependencyLinks = append(dependencyLinks, dependencyLink)
-	//		}
-	//
-	//	}
-	//}
 	return dependencyLinks, nil
 }
 
 func (h *HumioPlugin) DependencyReader() dependencystore.Reader {
-	h.Logger.Warn("INFOTAG DependencyReader()")
 	if h.dependencyReader == nil {
-		h.Logger.Warn("INFOTAG DependencyReader() is nil")
-		dependencyReader := &dependencyReader{logger: h.Logger, client: h.Client}
+		dependencyReader := &dependencyReader{logger: h.logger, client: h.client}
 		return dependencyReader
 	}
 	return h.dependencyReader
 }
-

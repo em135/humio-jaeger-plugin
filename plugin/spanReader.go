@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/hashicorp/go-hclog"
-	"github.com/jaegertracing/jaeger/model"
-	"github.com/jaegertracing/jaeger/storage/spanstore"
-	"github.com/opentracing/opentracing-go"
-	"humio-jaeger-plugin/models"
+	"humio-jaeger-plugin/humio"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hashicorp/go-hclog"
+	"github.com/jaegertracing/jaeger/model"
+	"github.com/jaegertracing/jaeger/storage/spanstore"
+	"github.com/opentracing/opentracing-go"
 )
 
 type spanReader struct {
@@ -21,11 +22,8 @@ type spanReader struct {
 }
 
 func (h *HumioPlugin) SpanReader() spanstore.Reader {
-	h.Logger.Warn("INFOTAG_READER SpanReader()")
-
 	if h.spanReader == nil {
-		h.Logger.Warn("INFOTAG SpanReader() is nil")
-		reader := &spanReader{logger: h.Logger, client: h.Client}
+		reader := &spanReader{logger: h.logger, client: h.client}
 		h.spanReader = reader
 		return reader
 	}
@@ -33,74 +31,63 @@ func (h *HumioPlugin) SpanReader() spanstore.Reader {
 }
 
 func (s *spanReader) GetTrace(ctx context.Context, traceID model.TraceID) (*model.Trace, error) {
-	s.logger.Warn("INFOTAG_READER GetTrace()")
-
-	span, ctx := opentracing.StartSpanFromContext(ctx, "GetTrace")
+	span, _ := opentracing.StartSpanFromContext(ctx, "GetTrace")
 	defer span.Finish()
 
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
-	var body = []byte(`{"queryString":"* | trace_id = ` + traceID.String() + ` | groupBy(field=[@rawstring])", "start": "` + beginningOfTime + `s", "end": "now"}`)
+	var body = []byte(`{"queryString":"#type = traces | trace_id = ` + traceID.String() + ` | select(@rawstring)", "start": "` + beginningOfTime + `s", "end": "now"}`)
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		s.logger.Error("INFOTAG GetTrace() error " + err.Error())
 		return nil, err
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		s.logger.Error("INFOTAG GetTrace() error " + err.Error())
 		return nil, err
 	}
 
 	defer resp.Body.Close()
-	var spanElements []models.SpanElement
+	var spanElements []humio.SpanElement
 	json.NewDecoder(resp.Body).Decode(&spanElements)
 
-	var spans []*model.Span
-	for i := range spanElements {
-		var spanElement = spanElements[i]
+	var spans = make([]*model.Span, 0, len(spanElements))
+	for _, spanElement := range spanElements {
 		span, err := createSpan(spanElement)
 		if err != nil {
-			s.logger.Error("INFOTAG GetTrace() error " + err.Error())
 			return nil, err
 		}
 		spans = append(spans, span)
 	}
 	var trace = model.Trace{
-		Spans:                spans,
+		Spans: spans,
 	}
 	return &trace, nil
 }
 
 // TODO beggningOfTime might not be a good idea, maybe make a system property that the image is run with?
 func (s *spanReader) GetServices(ctx context.Context) ([]string, error) {
-	s.logger.Warn("INFOTAG_READER GetServices()")
-
-	span, ctx := opentracing.StartSpanFromContext(ctx, "GetServices")
+	span, _ := opentracing.StartSpanFromContext(ctx, "GetServices")
 	defer span.Finish()
 
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
-	var body = []byte(`{"queryString":"groupBy(service)", "start": "` + beginningOfTime + `s", "end": "now"}`)
+	var body = []byte(`{"queryString":"#type = traces | groupBy(service)", "start": "` + beginningOfTime + `s", "end": "now"}`)
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		s.logger.Error("INFOTAG GetServices() error " + err.Error())
 		return nil, err
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		s.logger.Error("INFOTAG GetServices() error " + err.Error())
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var services []models.Service
+	var services []humio.Service
 	errdecode := json.NewDecoder(resp.Body).Decode(&services)
 	if errdecode != nil {
-		s.logger.Warn("INFOTAG GetServices() decode error " + errdecode.Error())
 		return nil, errdecode
 	}
-	var serviceNames []string
+	var serviceNames = make([]string, 0, len(services))
 	for _s := range services {
 		serviceNames = append(serviceNames, services[_s].Service)
 	}
@@ -109,9 +96,7 @@ func (s *spanReader) GetServices(ctx context.Context) ([]string, error) {
 
 // TODO beggningOfTime might not be a good idea, maybe make a system property that the image is run with?
 func (s *spanReader) GetOperations(ctx context.Context, query spanstore.OperationQueryParameters) ([]spanstore.Operation, error) {
-	s.logger.Warn("INFOTAG_READER GetOperations()")
-
-	span, ctx := opentracing.StartSpanFromContext(ctx, "GetOperations")
+	span, _ := opentracing.StartSpanFromContext(ctx, "GetOperations")
 	defer span.Finish()
 
 	var queryFields string
@@ -124,23 +109,20 @@ func (s *spanReader) GetOperations(ctx context.Context, query spanstore.Operatio
 		queryFields += "kind=" + kind + "|"
 	}
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
-	var body = []byte(`{"queryString":"` + queryFields + `groupBy(field=[name, kind])", "start": "` + beginningOfTime + `s", "end": "now"}`)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	var body = []byte(`{"queryString":#type = traces | "` + queryFields + `groupBy(field=[name, kind])", "start": "` + beginningOfTime + `s", "end": "now"}`)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		s.logger.Error("INFOTAG GetOperations() error: " + err.Error())
 		return nil, err
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		s.logger.Error("INFOTAG GetOperations() error " + err.Error())
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var operationsDecoded []models.Operation
+	var operationsDecoded []humio.Operation
 	errdecode := json.NewDecoder(resp.Body).Decode(&operationsDecoded)
 	if errdecode != nil {
-		s.logger.Error("INFOTAG GetOperations() decode error " + errdecode.Error())
 		return nil, errdecode
 	}
 
@@ -154,16 +136,14 @@ func (s *spanReader) GetOperations(ctx context.Context, query spanstore.Operatio
 }
 
 func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQueryParameters) ([]*model.Trace, error) {
-	s.logger.Warn("INFOTAG_READER FindTraces()")
-
-	span1, ctx := opentracing.StartSpanFromContext(ctx, "GetOperations")
+	span1, _ := opentracing.StartSpanFromContext(ctx, "GetOperations")
 	defer span1.Finish()
 
 	var service = query.ServiceName
 	var numOfTraces = strconv.Itoa(query.NumTraces)
 	var currentTime = time.Now().Unix()
-	var startTime = currentTime-query.StartTimeMin.Unix()
-	var endTime = currentTime-query.StartTimeMax.Unix()
+	var startTime = currentTime - query.StartTimeMin.Unix()
+	var endTime = currentTime - query.StartTimeMax.Unix()
 	if endTime < 0 {
 		endTime = 0
 	}
@@ -191,29 +171,29 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 
 	var body []byte
 	if minDuration == 0 && maxDuration == 0 {
-		var testString = `{"queryString":"* | trace_id =~ join({` + queryFields.String() + ` groupBy(trace_id, limit=` + numOfTraces + `)}) | groupBy(field=[@rawstring])", "start": "` + startTimeString + `s", "end": "` + endTimeString + `s"}`
-		s.logger.Warn("INFOTAG query " + testString)
+		var testString = `{"queryString":"#type = traces | trace_id =~ join({` + queryFields.String() + ` groupBy(trace_id, limit=` + numOfTraces + `)}) | select(@rawstring)", "start": "` + startTimeString + `s", "end": "` + endTimeString + `s"}`
+		s.logger.Debug("query " + testString)
 		body = []byte(testString)
 	} else {
-		// TODO bug, spans are limited, not trace ids
-		var testString = `{"queryString":"* | trace_id =~ join({` + queryFields.String() + ` | duration:=end-start | groupBy(trace_id, function=sum(duration, as=trace_duration)) | test(trace_duration >= ` + minDurationString + `) | test(trace_duration <= ` + maxDurationString + `)}) | groupBy(field=[@rawstring], limit=` + numOfTraces + `)", "start": "` + startTimeString + `s", "end": "` + endTimeString + `s"}`
-		s.logger.Warn("INFOTAG query " + testString)
+		// TODO: While max() of span durations is not guaranteed to be equal to trace duration, it is a very good approximation
+		// The sum of span durations is much larger than trace duration due to overlap!
+		// TODO Bug: This only considers the duration of spans matching the tags, not the duration of the entire trace itself!
+		var testString = `{"queryString":"#type = traces | trace_id =~ join({` + queryFields.String() + ` duration:=end-start | groupBy(trace_id, function=max(duration, as=trace_duration)) | test(trace_duration >= ` + minDurationString + `) | test(trace_duration <= ` + maxDurationString + `) | tail(` + numOfTraces + `)}) | select(@rawstring)", "start": "` + startTimeString + `s", "end": "` + endTimeString + `s"}`
+		s.logger.Debug("query " + testString)
 		body = []byte(testString)
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		s.logger.Error("INFOTAG FindTraces() error " + err.Error())
 		return nil, err
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		s.logger.Error("INFOTAG FindTraces() error " + err.Error())
 		return nil, err
 	}
 
 	defer resp.Body.Close()
-	var spanElements []models.SpanElement
+	var spanElements []humio.SpanElement
 	json.NewDecoder(resp.Body).Decode(&spanElements)
 
 	var traceIdSpans = make(map[string][]*model.Span)
@@ -222,7 +202,6 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 		var spanElement = spanElements[i]
 		span, err := createSpan(spanElement)
 		if err != nil {
-			s.logger.Error("INFOTAG FindTraces() error " + err.Error())
 			return nil, err
 		}
 		var traceId = span.TraceID.String()
@@ -241,7 +220,7 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 			traceDuration += span.Duration.Nanoseconds()
 		}
 		var trace = model.Trace{
-			Spans:                value,
+			Spans: value,
 		}
 		traces = append(traces, &trace)
 	}
@@ -250,16 +229,14 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 
 // This method is not used
 func (s *spanReader) FindTraceIDs(ctx context.Context, query *spanstore.TraceQueryParameters) ([]model.TraceID, error) {
-	s.logger.Warn("INFOTAG_READER FindTraceIDs()")
-
-	span, ctx := opentracing.StartSpanFromContext(ctx, "GetOperations")
+	span, _ := opentracing.StartSpanFromContext(ctx, "FindTraceIDs")
 	defer span.Finish()
 
 	return nil, nil
 }
 
-func createSpan(spanElement models.SpanElement) (*model.Span, error) {
-	var modelSpan models.Span
+func createSpan(spanElement humio.SpanElement) (*model.Span, error) {
+	var modelSpan humio.Span
 	json.Unmarshal([]byte(spanElement.Rawstring), &modelSpan)
 	traceId, err := model.TraceIDFromString(modelSpan.TraceID)
 	if err != nil {
@@ -274,32 +251,32 @@ func createSpan(spanElement models.SpanElement) (*model.Span, error) {
 
 	var references []model.SpanRef
 	var reference = model.SpanRef{
-		TraceID:              traceId,
-		SpanID:               parentId,
-		RefType:              0,
+		TraceID: traceId,
+		SpanID:  parentId,
+		RefType: 0,
 	}
 	references = append(references, reference)
 
 	process := model.Process{
-		ServiceName:          modelSpan.Service,
-		Tags:                 processTags,
+		ServiceName: modelSpan.Service,
+		Tags:        processTags,
 	}
 	var span = &model.Span{
-		TraceID:              traceId,
-		SpanID:               spanId,
-		OperationName:        modelSpan.Name,
-		References:           references,
-		Flags:                0,
-		StartTime:            time.Unix(0, modelSpan.Start),
-		Duration:             time.Duration(modelSpan.End - modelSpan.Start),
-		Tags:                 spanTags,
-		Logs:                 []model.Log{}, // TODO: Add the logs here
-		Process:              &process,
+		TraceID:       traceId,
+		SpanID:        spanId,
+		OperationName: modelSpan.Name,
+		References:    references,
+		Flags:         0,
+		StartTime:     time.Unix(0, modelSpan.Start),
+		Duration:      time.Duration(modelSpan.End - modelSpan.Start),
+		Tags:          spanTags,
+		Logs:          []model.Log{}, // TODO: Add the logs here
+		Process:       &process,
 	}
 	return span, nil
 }
 
-func createSpanTags(modelSpan models.Span) ([]model.KeyValue, []model.KeyValue) {
+func createSpanTags(modelSpan humio.Span) ([]model.KeyValue, []model.KeyValue) {
 	var spanTags []model.KeyValue
 	var processTags []model.KeyValue
 

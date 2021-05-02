@@ -2,11 +2,12 @@ package main
 
 import (
 	"flag"
+	"humio-jaeger-plugin/plugin"
+	"os"
+
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/plugin/storage/grpc"
 	"github.com/jaegertracing/jaeger/plugin/storage/grpc/shared"
-	"humio-jaeger-plugin/plugin"
-	"os"
 )
 
 const (
@@ -14,8 +15,13 @@ const (
 )
 
 func main() {
+	logLevel := os.Getenv("GRPC_STORAGE_PLUGIN_LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = hclog.Warn.String()
+	}
+
 	logger := hclog.New(&hclog.LoggerOptions{
-		Level:      hclog.Warn,
+		Level:      hclog.LevelFromString(logLevel),
 		Name:       loggerName,
 		JSONFormat: true,
 	})

@@ -1,4 +1,4 @@
-package models
+package humio
 
 type Operation struct {
 	Name string `json:"name"`
