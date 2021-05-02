@@ -121,7 +121,7 @@ func (s *spanReader) GetOperations(ctx context.Context, query spanstore.Operatio
 		queryFields += "kind=" + kind + "|"
 	}
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
-	var body = []byte(`{"queryString":#type = traces | "` + queryFields + `groupBy(field=[name, kind])", "start": "` + beginningOfTime + `s", "end": "now"}`)
+	var body = []byte(`{"queryString":"#type = traces | ` + queryFields + `groupBy(field=[name, kind])", "start": "` + beginningOfTime + `s", "end": "now"}`)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
