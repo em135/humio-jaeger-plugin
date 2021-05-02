@@ -1,26 +1,17 @@
 package plugin
 
-
-// TODO: api/traces/{trace_id} giver fejl, api/services virker, api/operations virker...
-// Måsker mangler der noget med lock / unlock
-// Måske skal der skives spans, det giver dog ikke mening, det er jo at skrive til Humio?
-// Der er nok noget galt med at tingene ikke bliver bundet sammen, eller der ikke bliver kaldt det rigtige?
 import (
-
 	"bytes"
 	"context"
 	"encoding/json"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/model"
-	"humio-jaeger-plugin/models"
-
-	//"github.com/jaegertracing/jaeger/model/adjuster"
-	//"github.com/jaegertracing/jaeger/pkg/memory/config"
-	//"github.com/golang/protobuf/proto"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
 	"github.com/opentracing/opentracing-go"
+	"humio-jaeger-plugin/models"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -31,6 +22,7 @@ type spanReader struct {
 
 func (h *HumioPlugin) SpanReader() spanstore.Reader {
 	h.Logger.Warn("INFOTAG_READER SpanReader()")
+
 	if h.spanReader == nil {
 		h.Logger.Warn("INFOTAG SpanReader() is nil")
 		reader := &spanReader{logger: h.Logger, client: h.Client}
@@ -45,16 +37,18 @@ func (s *spanReader) GetTrace(ctx context.Context, traceID model.TraceID) (*mode
 
 	span, ctx := opentracing.StartSpanFromContext(ctx, "GetTrace")
 	defer span.Finish()
+
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
 	var body = []byte(`{"queryString":"* | trace_id = ` + traceID.String() + ` | groupBy(field=[@rawstring])", "start": "` + beginningOfTime + `s", "end": "now"}`)
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
-
+		s.logger.Error("INFOTAG GetTrace() error " + err.Error())
 		return nil, err
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
+		s.logger.Error("INFOTAG GetTrace() error " + err.Error())
 		return nil, err
 	}
 
@@ -67,25 +61,24 @@ func (s *spanReader) GetTrace(ctx context.Context, traceID model.TraceID) (*mode
 		var spanElement = spanElements[i]
 		span, err := createSpan(spanElement)
 		if err != nil {
+			s.logger.Error("INFOTAG GetTrace() error " + err.Error())
 			return nil, err
 		}
 		spans = append(spans, span)
 	}
 	var trace = model.Trace{
 		Spans:                spans,
-		ProcessMap:           []model.Trace_ProcessMapping{},
-		Warnings:             []string{},
-		XXX_NoUnkeyedLiteral: struct{}{},
-		XXX_unrecognized:     []byte{},
-		XXX_sizecache:        0,
 	}
 	return &trace, nil
 }
 
+// TODO beggningOfTime might not be a good idea, maybe make a system property that the image is run with?
 func (s *spanReader) GetServices(ctx context.Context) ([]string, error) {
 	s.logger.Warn("INFOTAG_READER GetServices()")
+
 	span, ctx := opentracing.StartSpanFromContext(ctx, "GetServices")
 	defer span.Finish()
+
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
 	var body = []byte(`{"queryString":"groupBy(service)", "start": "` + beginningOfTime + `s", "end": "now"}`)
 
@@ -114,9 +107,10 @@ func (s *spanReader) GetServices(ctx context.Context) ([]string, error) {
 	return serviceNames, nil
 }
 
-// TODO beggningOfTime might not be a good idea, make a system property that the image is run with
+// TODO beggningOfTime might not be a good idea, maybe make a system property that the image is run with?
 func (s *spanReader) GetOperations(ctx context.Context, query spanstore.OperationQueryParameters) ([]spanstore.Operation, error) {
 	s.logger.Warn("INFOTAG_READER GetOperations()")
+
 	span, ctx := opentracing.StartSpanFromContext(ctx, "GetOperations")
 	defer span.Finish()
 
@@ -161,6 +155,7 @@ func (s *spanReader) GetOperations(ctx context.Context, query spanstore.Operatio
 
 func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQueryParameters) ([]*model.Trace, error) {
 	s.logger.Warn("INFOTAG_READER FindTraces()")
+
 	span1, ctx := opentracing.StartSpanFromContext(ctx, "GetOperations")
 	defer span1.Finish()
 
@@ -178,23 +173,30 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 	var endTimeString = strconv.FormatInt(endTime, 10)
 	var minDurationString = strconv.FormatInt(minDuration, 10)
 	var maxDurationString = strconv.FormatInt(maxDuration, 10)
+	var operation = query.OperationName
+	var tags = query.Tags
 
+	var queryFields strings.Builder
+	if service != "" {
+		queryFields.WriteString("service=" + service + "|")
+	}
+	if operation != "" {
+		queryFields.WriteString("name=" + operation + "|")
+	}
 
-
-	//var operation = query.OperationName
-	//var operation = query.OperationName
-	//query.Tags
-
-
+	for key := range tags {
+		var value = tags[key]
+		queryFields.WriteString("attributes." + key + "=" + value + "|")
+	}
 
 	var body []byte
 	if minDuration == 0 && maxDuration == 0 {
-		var testString = `{"queryString":"* | trace_id =~ join({service=` + service + ` | groupBy(trace_id, limit=` + numOfTraces + `)}) | groupBy(field=[@rawstring])", "start": "` + startTimeString + `s", "end": "` + endTimeString + `s"}`
+		var testString = `{"queryString":"* | trace_id =~ join({` + queryFields.String() + ` groupBy(trace_id, limit=` + numOfTraces + `)}) | groupBy(field=[@rawstring])", "start": "` + startTimeString + `s", "end": "` + endTimeString + `s"}`
 		s.logger.Warn("INFOTAG query " + testString)
 		body = []byte(testString)
 	} else {
 		// TODO bug, spans are limited, not trace ids
-		var testString = `{"queryString":"* | trace_id =~ join({service=` + service + ` | duration:=end-start | groupBy(trace_id, function=sum(duration, as=trace_duration)) | test(trace_duration >= ` + minDurationString + `) | test(trace_duration <= ` + maxDurationString + `)}) | groupBy(field=[@rawstring], limit=` + numOfTraces + `)", "start": "` + startTimeString + `s", "end": "` + endTimeString + `s"}`
+		var testString = `{"queryString":"* | trace_id =~ join({` + queryFields.String() + ` | duration:=end-start | groupBy(trace_id, function=sum(duration, as=trace_duration)) | test(trace_duration >= ` + minDurationString + `) | test(trace_duration <= ` + maxDurationString + `)}) | groupBy(field=[@rawstring], limit=` + numOfTraces + `)", "start": "` + startTimeString + `s", "end": "` + endTimeString + `s"}`
 		s.logger.Warn("INFOTAG query " + testString)
 		body = []byte(testString)
 	}
@@ -240,21 +242,19 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 		}
 		var trace = model.Trace{
 			Spans:                value,
-			ProcessMap:           []model.Trace_ProcessMapping{},
-			Warnings:             []string{},
-			XXX_NoUnkeyedLiteral: struct{}{},
-			XXX_unrecognized:     []byte{},
-			XXX_sizecache:        0,
 		}
 		traces = append(traces, &trace)
 	}
 	return traces, nil
 }
 
+// This method is not used
 func (s *spanReader) FindTraceIDs(ctx context.Context, query *spanstore.TraceQueryParameters) ([]model.TraceID, error) {
 	s.logger.Warn("INFOTAG_READER FindTraceIDs()")
+
 	span, ctx := opentracing.StartSpanFromContext(ctx, "GetOperations")
 	defer span.Finish()
+
 	return nil, nil
 }
 
@@ -270,25 +270,19 @@ func createSpan(spanElement models.SpanElement) (*model.Span, error) {
 		return nil, err
 	}
 	parentId, _ := model.SpanIDFromString(modelSpan.ParentID)
-	spanTags := createSpanTags(modelSpan)
+	spanTags, processTags := createSpanTags(modelSpan)
 
 	var references []model.SpanRef
 	var reference = model.SpanRef{
 		TraceID:              traceId,
 		SpanID:               parentId,
 		RefType:              0,
-		XXX_NoUnkeyedLiteral: struct{}{},
-		XXX_unrecognized:     []byte{},
-		XXX_sizecache:        0,
 	}
 	references = append(references, reference)
 
 	process := model.Process{
 		ServiceName:          modelSpan.Service,
-		Tags:                 []model.KeyValue{},
-		XXX_NoUnkeyedLiteral: struct{}{},
-		XXX_unrecognized:     []byte{},
-		XXX_sizecache:        0,
+		Tags:                 processTags,
 	}
 	var span = &model.Span{
 		TraceID:              traceId,
@@ -299,26 +293,30 @@ func createSpan(spanElement models.SpanElement) (*model.Span, error) {
 		StartTime:            time.Unix(0, modelSpan.Start),
 		Duration:             time.Duration(modelSpan.End - modelSpan.Start),
 		Tags:                 spanTags,
-		Logs:                 []model.Log{},
+		Logs:                 []model.Log{}, // TODO: Add the logs here
 		Process:              &process,
-		ProcessID:            "",
-		Warnings:             []string{},
-		XXX_NoUnkeyedLiteral: struct{}{},
-		XXX_unrecognized:     []byte{},
-		XXX_sizecache:        0,
 	}
 	return span, nil
 }
 
-func createSpanTags(modelSpan models.Span) []model.KeyValue {
+func createSpanTags(modelSpan models.Span) ([]model.KeyValue, []model.KeyValue) {
 	var spanTags []model.KeyValue
+	var processTags []model.KeyValue
+
 	for key, value := range modelSpan.Attributes {
-		spanTags = append(spanTags, model.KeyValue{Key: key, VStr: string(value)})
+		if strings.HasPrefix(key, "process.") {
+			key = strings.Replace(key, "process.", "", 1)
+			processTags = append(processTags, model.KeyValue{Key: key, VStr: string(value)})
+		} else {
+			spanTags = append(spanTags, model.KeyValue{Key: key, VStr: string(value)})
+		}
 	}
+
 	var spanKind = getJaegerSpanKind(modelSpan.Kind)
 	if spanKind != "" {
 		spanTags = append(spanTags, model.KeyValue{Key: "span.kind", VStr: spanKind})
 	}
+
 	var status = getStatus(modelSpan.Status)
 	if status != "" {
 		spanTags = append(spanTags, model.KeyValue{Key: "span.status", VStr: status})
@@ -326,7 +324,8 @@ func createSpanTags(modelSpan models.Span) []model.KeyValue {
 			spanTags = append(spanTags, model.KeyValue{Key: "error", VStr: "true"})
 		}
 	}
-	return spanTags
+
+	return spanTags, processTags
 }
 
 func getJaegerSpanKind(input string) string {

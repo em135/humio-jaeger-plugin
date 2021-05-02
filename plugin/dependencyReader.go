@@ -9,7 +9,6 @@ import (
 	"github.com/jaegertracing/jaeger/storage/dependencystore"
 	"github.com/opentracing/opentracing-go"
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -119,45 +118,6 @@ func (d dependencyReader) GetDependencies(ctx context.Context, endTs time.Time, 
 	//
 	//	}
 	//}
-	d.logger.Warn("INFOTAG GetDependencies()5")
-	//var m1 = model.DependencyLink{
-	//	Parent:               "m1",
-	//	Child:                "m2",
-	//	CallCount:            1,
-	//	Source:               "idk",
-	//	XXX_NoUnkeyedLiteral: struct{}{},
-	//	XXX_unrecognized:     nil,
-	//	XXX_sizecache:        0,
-	//}
-	//var m2 = model.DependencyLink{
-	//	Parent:               "m1",
-	//	Child:                "m3",
-	//	CallCount:            1,
-	//	Source:               "idk",
-	//	XXX_NoUnkeyedLiteral: struct{}{},
-	//	XXX_unrecognized:     nil,
-	//	XXX_sizecache:        0,
-	//}
-	//
-	//
-	//var m3 = model.DependencyLink{
-	//	Parent:               "",
-	//	Child:                "",
-	//	CallCount:            1,
-	//	Source:               "idk",
-	//	XXX_NoUnkeyedLiteral: struct{}{},
-	//	XXX_unrecognized:     nil,
-	//	XXX_sizecache:        0,
-	//}
-	//
-	//
-	//var models []model.DependencyLink
-	//models = append(models, m1)
-	//models = append(models, m2)
-	//models = append(models, m3)
-	// TODO dependencyLinks længde er 0 :O
-	t := strconv.Itoa(len(dependencyLinks))
-	d.logger.Warn("INFOTAG GetDependencies() 6 lenght " + t)
 	return dependencyLinks, nil
 }
 

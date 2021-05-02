@@ -11,8 +11,7 @@ type spanWriter struct {
 }
 
 func (s spanWriter) WriteSpan(ctx context.Context, span *model.Span) error {
-	s.plugin.Logger.Warn("INFOTAG WriteSpan() trace id " + span.TraceID.String())
-	s.plugin.Logger.Warn("INFOTAG WriteSpan() span id  " + span.SpanID.String())
+	s.plugin.Logger.Warn("INFOTAG WriteSpan()")
 	return nil
 }
 

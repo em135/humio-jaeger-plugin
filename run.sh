@@ -1,13 +1,9 @@
-##!/bin/bash
-#export GOOS=linux
-#export GOARCH=amd64
-#CGO_ENABLED=0 go build -v -ldflags '-extldflags "-static"'
-
 docker stop jaeger
 docker rm jaeger
 
 docker build -t  em135/humio-jaeger-plugin:latest .
 docker run -it -d \
+  -e API_TOKEN=myToken \
   --name jaeger \
   -p 5775:5775/udp \
   -p 6831:6831/udp \
@@ -18,6 +14,3 @@ docker run -it -d \
   -p 9411:9411 \
   -p 14250:14250 \
   em135/humio-jaeger-plugin:latest
-
-#sleep 2
-#docker logs jaeger
