@@ -47,12 +47,24 @@ func (s *spanReader) GetTrace(ctx context.Context, traceID model.TraceID) (*mode
 	}
 
 	defer resp.Body.Close()
-	var spanElements []humio.SpanElement
-	json.NewDecoder(resp.Body).Decode(&spanElements)
+	var spanResponse []humio.SpanResponse
+	json.NewDecoder(resp.Body).Decode(&spanResponse)
 
-	var spans = make([]*model.Span, 0, len(spanElements))
-	for _, spanElement := range spanElements {
-		span, err := createSpan(spanElement)
+	logs, err := s.findLogs([]string{traceID.String()}, beginningOfTime, "now", ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var spans = make([]*model.Span, 0, len(spanResponse))
+	for _, humioSpan := range spanResponse {
+		log := []*humio.Log{}
+		if traceLogs, ok := logs[humioSpan.Payload().TraceID]; ok {
+			if spanLogs, ok := traceLogs[humioSpan.Payload().SpanID]; ok {
+				log = spanLogs
+			}
+		}
+
+		span, err := createSpan(humioSpan.Payload(), log)
 		if err != nil {
 			return nil, err
 		}
@@ -172,14 +184,14 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 	var body []byte
 	if minDuration == 0 && maxDuration == 0 {
 		var testString = `{"queryString":"#type = traces | trace_id =~ join({` + queryFields.String() + ` groupBy(trace_id, limit=` + numOfTraces + `)}) | select(@rawstring)", "start": "` + startTimeString + `s", "end": "` + endTimeString + `s"}`
-		s.logger.Debug("query " + testString)
+		s.logger.Debug("Query: " + testString)
 		body = []byte(testString)
 	} else {
 		// TODO: While max() of span durations is not guaranteed to be equal to trace duration, it is a very good approximation
 		// The sum of span durations is much larger than trace duration due to overlap!
 		// TODO Bug: This only considers the duration of spans matching the tags, not the duration of the entire trace itself!
 		var testString = `{"queryString":"#type = traces | trace_id =~ join({` + queryFields.String() + ` duration:=end-start | groupBy(trace_id, function=max(duration, as=trace_duration)) | test(trace_duration >= ` + minDurationString + `) | test(trace_duration <= ` + maxDurationString + `) | tail(` + numOfTraces + `)}) | select(@rawstring)", "start": "` + startTimeString + `s", "end": "` + endTimeString + `s"}`
-		s.logger.Debug("query " + testString)
+		s.logger.Debug("Query: " + testString)
 		body = []byte(testString)
 	}
 
@@ -193,14 +205,36 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 	}
 
 	defer resp.Body.Close()
-	var spanElements []humio.SpanElement
-	json.NewDecoder(resp.Body).Decode(&spanElements)
+	var spanResponse []humio.SpanResponse
+	json.NewDecoder(resp.Body).Decode(&spanResponse)
+
+	// Get all trace ids to query for logs
+	// Go does not have sets, so this is a hacky alternative
+	traceIdSet := map[string]struct{}{}
+	for _, span := range spanResponse {
+		traceIdSet[span.Payload().TraceID] = struct{}{}
+	}
+	traceIds := make([]string, 0, len(traceIdSet))
+	for id := range traceIdSet {
+		traceIds = append(traceIds, id)
+	}
+	logs, err := s.findLogs(traceIds, startTimeString, endTimeString, ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	var traceIdSpans = make(map[string][]*model.Span)
 
-	for i := range spanElements {
-		var spanElement = spanElements[i]
-		span, err := createSpan(spanElement)
+	for i := range spanResponse {
+		var humioSpan = spanResponse[i].Payload()
+		log := []*humio.Log{}
+		if traceLogs, ok := logs[humioSpan.TraceID]; ok {
+			if spanLogs, ok := traceLogs[humioSpan.SpanID]; ok {
+				log = spanLogs
+			}
+		}
+
+		span, err := createSpan(humioSpan, log)
 		if err != nil {
 			return nil, err
 		}
@@ -235,19 +269,57 @@ func (s *spanReader) FindTraceIDs(ctx context.Context, query *spanstore.TraceQue
 	return nil, nil
 }
 
-func createSpan(spanElement humio.SpanElement) (*model.Span, error) {
-	var modelSpan humio.Span
-	json.Unmarshal([]byte(spanElement.Rawstring), &modelSpan)
-	traceId, err := model.TraceIDFromString(modelSpan.TraceID)
+func (s *spanReader) findLogs(traceIds []string, start string, end string, ctx context.Context) (map[string]map[string][]*humio.Log, error) {
+	if len(traceIds) == 0 {
+		return map[string]map[string][]*humio.Log{}, nil
+	}
+
+	var queryString = `{"queryString":"#type = elastic_input | in(traceId, values=[` + strings.Join(traceIds, ",") + `])", "start": "` + start + `s", "end": "` + end + `s"}`
+	s.logger.Debug("Query: " + queryString)
+	body := []byte(queryString)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
-	spanId, err := model.SpanIDFromString(modelSpan.SpanID)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	parentId, _ := model.SpanIDFromString(modelSpan.ParentID)
-	spanTags, processTags := createSpanTags(modelSpan)
+
+	defer resp.Body.Close()
+	var rawLogs []*humio.Log
+	err = json.NewDecoder(resp.Body).Decode(&rawLogs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Return logs ordered by trace id and span id (double nested map of slices)
+	logs := map[string]map[string][]*humio.Log{}
+	for _, log := range rawLogs {
+		if traceLogs, ok := logs[log.TraceID]; ok {
+			traceLogs[log.SpanID] = append(traceLogs[log.SpanID], log)
+		} else {
+			logs[log.TraceID] = map[string][]*humio.Log{
+				log.SpanID: {log},
+			}
+		}
+	}
+
+	return logs, nil
+}
+
+func createSpan(humioSpan *humio.Span, humioLogs []*humio.Log) (*model.Span, error) {
+	traceId, err := model.TraceIDFromString(humioSpan.TraceID)
+	if err != nil {
+		return nil, err
+	}
+	spanId, err := model.SpanIDFromString(humioSpan.SpanID)
+	if err != nil {
+		return nil, err
+	}
+	parentId, _ := model.SpanIDFromString(humioSpan.ParentID)
+	spanTags, processTags := createSpanTags(humioSpan)
 
 	var references []model.SpanRef
 	var reference = model.SpanRef{
@@ -258,25 +330,37 @@ func createSpan(spanElement humio.SpanElement) (*model.Span, error) {
 	references = append(references, reference)
 
 	process := model.Process{
-		ServiceName: modelSpan.Service,
+		ServiceName: humioSpan.Service,
 		Tags:        processTags,
 	}
+
+	// TODO: Do errors look right?
+	logs := make([]model.Log, 0, len(humioLogs))
+	for _, log := range humioLogs {
+		logs = append(logs, model.Log{
+			Timestamp: time.Unix(0, log.Timestamp*int64(time.Millisecond)),
+			Fields: []model.KeyValue{
+				model.String("event", log.Event),
+			},
+		})
+	}
+
 	var span = &model.Span{
 		TraceID:       traceId,
 		SpanID:        spanId,
-		OperationName: modelSpan.Name,
+		OperationName: humioSpan.Name,
 		References:    references,
 		Flags:         0,
-		StartTime:     time.Unix(0, modelSpan.Start),
-		Duration:      time.Duration(modelSpan.End - modelSpan.Start),
+		StartTime:     time.Unix(0, humioSpan.Start),
+		Duration:      time.Duration(humioSpan.End - humioSpan.Start),
 		Tags:          spanTags,
-		Logs:          []model.Log{}, // TODO: Add the logs here
+		Logs:          logs,
 		Process:       &process,
 	}
 	return span, nil
 }
 
-func createSpanTags(modelSpan humio.Span) ([]model.KeyValue, []model.KeyValue) {
+func createSpanTags(modelSpan *humio.Span) ([]model.KeyValue, []model.KeyValue) {
 	var spanTags []model.KeyValue
 	var processTags []model.KeyValue
 

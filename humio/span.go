@@ -1,6 +1,23 @@
 package humio
 
-import "encoding/json"
+import (
+	"encoding/json"
+)
+
+type SpanResponse struct {
+	RawString string `json:"@rawstring"`
+
+	humioSpan *Span
+}
+
+func (s *SpanResponse) Payload() *Span {
+	if s.humioSpan == nil {
+		var span Span
+		json.Unmarshal([]byte(s.RawString), &span)
+		s.humioSpan = &span
+	}
+	return s.humioSpan
+}
 
 type Span struct {
 	TraceID    string                     `json:"trace_id"`
