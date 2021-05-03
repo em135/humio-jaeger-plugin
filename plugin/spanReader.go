@@ -178,7 +178,15 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 
 	for key := range tags {
 		var value = tags[key]
-		queryFields.WriteString("attributes." + key + "=" + value + "|")
+		if !strings.EqualFold(key, strings.TrimSpace("error")) {
+			queryFields.WriteString("attributes." + key + "=" + value + "|")
+		} else {
+			if strings.EqualFold(value, strings.TrimSpace("true")) {
+				queryFields.WriteString("status=STATUS_CODE_ERROR |")
+			} else if strings.EqualFold(value, strings.TrimSpace("false")) {
+				queryFields.WriteString("status=STATUS_CODE_UNSET |")
+			}
+		}
 	}
 
 	var body []byte
