@@ -282,7 +282,10 @@ func (s *spanReader) findLogs(traceIds []string, start string, end string, ctx c
 		return map[string]map[string][]*humio.Log{}, nil
 	}
 
-	var queryString = `{"queryString":"#type = elastic_input | in(traceId, values=[` + strings.Join(traceIds, ",") + `])", "start": "` + start + `s", "end": "` + end + `s"}`
+	if end != "now" {
+		end += "s"
+	}
+	var queryString = `{"queryString":"#type = elastic_input | in(trace_id, values=[` + strings.Join(traceIds, ",") + `])", "start": "` + start + `s", "end": "` + end + `"}`
 	s.logger.Debug("Query: " + queryString)
 	body := []byte(queryString)
 
