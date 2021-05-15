@@ -2,6 +2,9 @@ package plugin
 
 import (
 	"net/http"
+	"net/url"
+	"os"
+	"path"
 
 	"github.com/hashicorp/go-hclog"
 )
@@ -13,19 +16,26 @@ type HumioPlugin struct {
 
 	logger hclog.Logger
 	client *http.Client
+	url    string
 }
-
-const (
-	url = "https://cloud.humio.com/api/v1/repositories/sockshop-traces/query"
-)
 
 func NewHumioPlugin(logger hclog.Logger, token string) *HumioPlugin {
 	client := http.DefaultClient
 	rt := NewAddHeader(client.Transport, token)
 	client.Transport = rt
+
+	endpoint, err := url.Parse(os.Getenv("HUMIO_ENDPOINT"))
+	if err != nil {
+		logger.Error(err.Error())
+	}
+
+	repo := os.Getenv("HUMIO_REPOSITORY")
+	endpoint.Path = path.Join(endpoint.Path, "api/v1/repositories/", repo, "query")
+
 	return &HumioPlugin{
 		logger: logger,
 		client: client,
+		url:    endpoint.String(),
 	}
 }
 

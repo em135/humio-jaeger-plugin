@@ -19,11 +19,12 @@ import (
 type spanReader struct {
 	logger hclog.Logger
 	client *http.Client
+	url    string
 }
 
 func (h *HumioPlugin) SpanReader() spanstore.Reader {
 	if h.spanReader == nil {
-		reader := &spanReader{logger: h.logger, client: h.client}
+		reader := &spanReader{logger: h.logger, client: h.client, url: h.url}
 		h.spanReader = reader
 		return reader
 	}
@@ -37,7 +38,7 @@ func (s *spanReader) GetTrace(ctx context.Context, traceID model.TraceID) (*mode
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
 	var body = []byte(`{"queryString":"#type = traces | trace_id = ` + traceID.String() + ` | select(@rawstring)", "start": "` + beginningOfTime + `s", "end": "now"}`)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", s.url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +85,7 @@ func (s *spanReader) GetServices(ctx context.Context) ([]string, error) {
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
 	var body = []byte(`{"queryString":"#type = traces | groupBy(service)", "start": "` + beginningOfTime + `s", "end": "now"}`)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", s.url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +123,7 @@ func (s *spanReader) GetOperations(ctx context.Context, query spanstore.Operatio
 	}
 	var beginningOfTime = strconv.FormatInt(time.Time.Unix(time.Now()), 10)
 	var body = []byte(`{"queryString":"#type = traces | ` + queryFields + `groupBy(field=[name, kind])", "start": "` + beginningOfTime + `s", "end": "now"}`)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", s.url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +204,7 @@ func (s *spanReader) FindTraces(ctx context.Context, query *spanstore.TraceQuery
 		body = []byte(testString)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", s.url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +290,7 @@ func (s *spanReader) findLogs(traceIds []string, start string, end string, ctx c
 	s.logger.Debug("Query: " + queryString)
 	body := []byte(queryString)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", s.url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}

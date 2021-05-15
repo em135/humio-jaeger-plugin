@@ -5,6 +5,8 @@ docker build -t em135/humio-jaeger-plugin:latest .
 docker run -it -d \
   -e API_TOKEN=${API_TOKEN} \
   -e GRPC_STORAGE_PLUGIN_LOG_LEVEL=debug \
+  -e HUMIO_ENDPOINT=${HUMIO_ENDPOINT} \
+  -e HUMIO_REPOSITORY=${HUMIO_REPOSITORY} \
   --name jaeger \
   -p 5775:5775/udp \
   -p 6831:6831/udp \

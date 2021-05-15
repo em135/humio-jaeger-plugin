@@ -16,6 +16,7 @@ import (
 type dependencyReader struct {
 	logger hclog.Logger
 	client *http.Client
+	url    string
 }
 
 type Dependency struct {
@@ -33,7 +34,7 @@ func (d dependencyReader) GetDependencies(ctx context.Context, endTs time.Time, 
 	d.logger.Warn("GetDependencies(): " + stringBody)
 	var body = []byte(`{"queryString":"groupBy([service, span_id, parent_id])", "start": "` + oneDayAgo + `", "end": "now"}`)
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", d.url, bytes.NewBuffer(body))
 	if err != nil {
 
 		return nil, err
@@ -95,7 +96,7 @@ func (d dependencyReader) GetDependencies(ctx context.Context, endTs time.Time, 
 
 func (h *HumioPlugin) DependencyReader() dependencystore.Reader {
 	if h.dependencyReader == nil {
-		dependencyReader := &dependencyReader{logger: h.logger, client: h.client}
+		dependencyReader := &dependencyReader{logger: h.logger, client: h.client, url: h.url}
 		return dependencyReader
 	}
 	return h.dependencyReader
