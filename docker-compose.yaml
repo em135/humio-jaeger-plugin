@@ -8,7 +8,7 @@ services:
         environment:
             - GRPC_STORAGE_PLUGIN_LOG_LEVEL=debug
             - HUMIO_ENDPOINT=https://cloud.humio.com/
-            - HUMIO_REPOSITORY=sandbox
+            - HUMIO_REPOSITORY=sockshop-traces
         # For the API_TOKEN
         env_file: secrets.env
         ports:
